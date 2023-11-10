@@ -4,10 +4,11 @@ library(stringr)
 library(tidyr)
 library(lubridate)
 library(geosphere)
-library(rgdal)
+library(st)
 library(sf)
 library(data.table)
 library(aopdata)
+library(terra)
 
 #CARREGANDO ARQUIVOS BRUTOS
 ##CARREGANDO GPS
@@ -23,8 +24,10 @@ myfiles = list.files(path=getwd(),pattern="*.csv",full.names=TRUE)
 SBE = ldply(myfiles, read.csv, sep=";")
 rm(myfiles)
 setwd('..')
+SBE$CARTAO_USUARIO <- paste0("ID", SBE$CARTAO_USUARIO)
+
 ##CARREGANDO DADOS DE DEMANDA DO MCO
-## NECESSÁRIO COPIAR ELES DO XLSX PRELIMINARMENTE
+## NECESS?RIO COPIAR ELES DO XLSX PRELIMINARMENTE
 myfiles = list.files(path=getwd(),pattern="relopemapa*",full.names=TRUE)
 MCO <- read.csv(myfiles,sep=";",encoding = 'latin1')
 ##BD DE VIAGENS REALIZADAS - RESUMO
@@ -35,15 +38,15 @@ setwd('..')
 ##LISTA DE PEDS GEORREFERENCIADOS
 myfiles = list.files(path=getwd(),pattern="SUBLINHAS_vs*",full.names=TRUE)
 SUBLINHA_VS_PED<-read.csv(myfiles,sep=";",encoding = 'latin1')
-dia_emb<-str_sub(MCO$Data.Hora.Início.Operação[1],end=10)
-##LISTA DE ESTAÇÕES GEORREFERENCIADAS
+dia_emb<-str_sub(MCO$Data.Hora.Inicio.Operacao[1],end=10)
+##LISTA DE ESTA??ES GEORREFERENCIADAS
 myfiles = list.files(path=getwd(),pattern="SUBLINHAS_vs*",full.names=TRUE)
 SUBLINHA_VS_PED<-read.csv(myfiles,sep=";",encoding = 'latin1')
 myfiles = list.files(path=getwd(),pattern="X e Y*",full.names=TRUE)
 PED_Est<-read.csv(myfiles,sep=";")
 rm(myfiles)
 
-#CRIANDO CHAVE PARA ASSOCIAÇÃO DE EMBARQUES NO GPS
+#CRIANDO CHAVE PARA ASSOCIA??O DE EMBARQUES NO GPS
 
 GPS$CHAVE<-paste(GPS$vei_nro_veiculo_gestor,GPS$horario_passagem)
 GPS$CHAVE<-gsub(':','',GPS$CHAVE)
@@ -53,9 +56,11 @@ GPS$CHAVE<-as.numeric(GPS$CHAVE)
 #TRANSFORMANDO CARTOES PARA TEXTO
 
 SBE$CARTAO_USUARIO<-as.character(SBE$CARTAO_USUARIO)
+SBE$CARTAO_USUARIO <- paste0("ID", as.character(SBE$CARTAO_USUARIO))
 
 #SEPARANDO DATA E HORA NO SBE
-
+nrow(SBE)
+nrow(CIT)
 CIT<-str_split_fixed(SBE$DATAHORA_UTILIZACAO," ",2)
 colnames(CIT) <-c("Data","Hora")
 SBE<-cbind.data.frame(SBE,CIT)
@@ -89,12 +94,12 @@ SBE$CHAVE<-as.numeric(SBE$CHAVE)
 SBE<-arrange(SBE,CODIGO_VEICULO,Hora)
 GPS<-arrange(GPS,vei_nro_veiculo_gestor,horario_passagem)
 
-# Função para associar o par_cod_siu ao número mais próximo na coluna CHAVE
+# Fun??o para associar o par_cod_siu ao n?mero mais pr?ximo na coluna CHAVE
 associar_par_cod_siu <- function(SBE, GPS) {
   setDT(SBE)
   setDT(GPS)
   
-  # Verificar duplicatas e remover se necessário
+  # Verificar duplicatas e remover se necess?rio
   SBE <- unique(SBE, by = "CHAVE")
   GPS <- unique(GPS, by = "CHAVE")
   
@@ -124,7 +129,7 @@ associar_par_cod_siu <- function(SBE, GPS) {
   return(SBE)
 }
 
-# Utilizando a função associar_par_cod_siu
+# Utilizando a fun??o associar_par_cod_siu
 EMBARQUES <- associar_par_cod_siu(SBE, GPS)
 EMBARQUES$CHAVE<-NULL
 SBE_ESTACOES$data<-EMBARQUES$data[1]
@@ -135,7 +140,7 @@ SBE_ESTACOES$inicio_viagem<-SBE_ESTACOES$Hora
 SBE_ESTACOES$sentido_itinerario<-'PC1'
 EMBARQUES<-bind_rows(EMBARQUES,SBE_ESTACOES)
 
-#REMOVENDO ARQUIVOS DESNECESSÁRIOS
+#REMOVENDO ARQUIVOS DESNECESS?RIOS
 colnames(EMBARQUES)<-c("NOME OPERADORA","VEICULO","LINHA","CARTAO","TP_CARTAO","VALOR_COBRADO","HORARIO_VALIDACAO","CIT_SUBLINHA","SIU","COD_VIAGEM","Abertura","Sentido","CIT_DATA")
 rm(associar_par_cod_siu,VEIC.GPS)
 
@@ -164,39 +169,39 @@ colnames(PASS_PESQU_VIAGEM_EMB)<-c("CHAVE","PASS_PESQU")
 PASS_PESQU_VIAGEM_EMB$PASS_PESQU<-as.numeric(as.character(PASS_PESQU_VIAGEM_EMB$PASS_PESQU))
 rm(LIST_PASS_PESQ_POR_VIAGEM_EMB)
 
-#CALCULANDO INTERVALOS ENTRE VALIDAÇÕES
+#CALCULANDO INTERVALOS ENTRE VALIDA??ES
 OD<-EMBARQUES
 OD$HORARIO_VALIDACAO<- as.POSIXct(str_c(OD$CIT_DATA,' ',OD$HORARIO_VALIDACAO), format="%Y-%m-%d %H:%M:%S")
 OD<-OD[order(OD$CARTAO,OD$HORARIO_VALIDACAO),]
 
-# Selecionar apenas as validações que têm mais de um registro
+# Selecionar apenas as valida??es que t?m mais de um registro
 OD_filtrado <- OD %>% 
   group_by(CARTAO) %>% 
   filter(n() > 1)
 
-# Calcular o intervalo de tempo entre as validações para cada cartão e retirando validações com intervalos menores que 5 min
+# Calcular o intervalo de tempo entre as valida??es para cada cart?o e retirando valida??es com intervalos menores que 5 min
 OD_filtrado <- OD_filtrado %>%
   group_by(CIT_DATA, CARTAO) %>%
   mutate(INT_VAL = ifelse(row_number() == 1, 0, HORARIO_VALIDACAO - lag(HORARIO_VALIDACAO))) %>%
   filter(INT_VAL >= 5 | row_number() == 1)
 
-# Selecionar apenas as primeiras validações de cada cartão
+# Selecionar apenas as primeiras valida??es de cada cart?o
 primeiras_val = OD_filtrado %>% 
   group_by(CARTAO) %>% 
   filter(row_number() == 1)
 
-# Selecionar as validações com intervalos maiores que 90 minutos
+# Selecionar as valida??es com intervalos maiores que 90 minutos
 val_maiores_90 = OD_filtrado %>% 
   filter(INT_VAL >= 90)
 val_menores_90 = OD_filtrado %>% 
   filter(INT_VAL < 90)
 
-# Juntar os três dataframes em um único dataframe
+# Juntar os tr?s dataframes em um ?nico dataframe
 OD <- bind_rows(primeiras_val, val_maiores_90)
 
-#VALIDAÇÕES COM DISTÂNCIA MENOR QUE 600M
+#VALIDA??ES COM DIST?NCIA MENOR QUE 600M
 
-PED<-SUBLINHA_VS_PED %>% dplyr::select("Código.SIU","Coord..X","Coord..Y")
+PED<-SUBLINHA_VS_PED %>% dplyr::select("CÃ³digo.SIU","Coord..X","Coord..Y")
 colnames(PED)<-c("SIU","x","Y")
 PED<-subset(PED,!duplicated(PED$SIU))
 PED$SIU<-as.character(PED$SIU)
@@ -209,7 +214,6 @@ OD_joined <- left_join(OD, PED, by = "SIU")
 ids_com_na <- filter(OD_joined,is.na(x))
 OD_joined<-filter(OD_joined,!CARTAO %in% ids_com_na$CARTAO)
 
-# Cria um objeto SpatialPointsDataFrame a partir do dataset OD_joined
 proj4string <- CRS("+proj=utm +zone=23 +south +ellps=GRS80 +units=m +no_defs")
 spdf_joined <- SpatialPointsDataFrame(coords = OD_joined[,c("x", "Y")], data = OD_joined,
                                       proj4string = proj4string)
@@ -217,15 +221,11 @@ spdf_joined <- SpatialPointsDataFrame(coords = OD_joined[,c("x", "Y")], data = O
 # Converte para WGS84
 spdf_joined_wgs84 <- spTransform(spdf_joined, CRS("+init=epsg:4326"))
 
-# Ordena o dataset pelo cartão e horário de utilização
+# Ordena o dataset pelo cart?o e hor?rio de utiliza??o
 OD_joined <- OD_joined[order(OD_joined$CARTAO, OD_joined$HORARIO_VALIDACAO),]
 
-# Adiciona as coordenadas WGS84 ao dataset
-OD_joined$lon <- coordinates(spdf_joined_wgs84)[,1]
-OD_joined$lat <- coordinates(spdf_joined_wgs84)[,2]
 
-# Calcula a distância entre o registro atual e o anterior
-
+# Calcula a dist?ncia entre o registro atual e o anterior
 distHaversine <- function(lon1, lat1, lon2, lat2) {
   rad <- pi / 180
   R <- 6378137
@@ -238,29 +238,29 @@ distHaversine <- function(lon1, lat1, lon2, lat2) {
   d <- R * c
   return(d)
 }
-OD_joined$dist <- ifelse(OD_joined$CARTAO==lag(OD_joined$CARTAO),c(0, distHaversine(OD_joined$lon[-nrow(OD_joined)], OD_joined$lat[-nrow(OD_joined)], OD_joined$lon[-1], OD_joined$lat[-1])),9999)
+
+OD_joined$dist <- ifelse(OD_joined$CARTAO==lag(OD_joined$CARTAO),c(0, distHaversine(OD_joined$x[-nrow(OD_joined)], OD_joined$Y[-nrow(OD_joined)], OD_joined$x[-1], OD_joined$Y[-1])),9999)
 OD_joined$dist[1]<-9999
 
-# Removendo as utilizações com distância inferior a 600 metros
+# Removendo as utiliza??es com dist?ncia inferior a 600 metros
 OD_joined <- OD_joined %>% filter(dist >= 600)
 
-# Selecionar apenas as validações que têm mais de um registro para repetir a matriz distancia
+# Selecionar apenas as valida??es que t?m mais de um registro para repetir a matriz distancia
 OD_joined <- OD_joined %>% 
   group_by(CARTAO) %>% 
   filter(n() > 1)
 
-# Calcula a distância entre o registro atual e o anterior para remover todas as validações menores que 600m
+# Encontra o valor mÃ­nimo nÃ£o faltante em OD_joined$dist
+j <- min(OD_joined$dist, na.rm = TRUE)
 
-j<-min(OD_joined$dist)
-
+# Verifica se j Ã© menor que 600
 while(j<600){
-  OD_joined$dist <- ifelse(OD_joined$CARTAO==lag(OD_joined$CARTAO),c(0, distHaversine(OD_joined$lon[-nrow(OD_joined)], OD_joined$lat[-nrow(OD_joined)], OD_joined$lon[-1], OD_joined$lat[-1])),9999)
+  OD_joined$dist <- ifelse(OD_joined$CARTAO==lag(OD_joined$CARTAO),c(0, distHaversine(OD_joined$x[-nrow(OD_joined)], OD_joined$Y[-nrow(OD_joined)], OD_joined$x[-1], OD_joined$Y[-1])),9999)
   OD_joined$dist[1]<-9999
   OD_joined <- OD_joined %>% filter(dist >= 600)
   OD_joined <- OD_joined %>% group_by(CARTAO) %>% filter(n() > 1)
   j<-min(OD_joined$dist)
 }
-
 #Definindo os destinos de cada viagem
 
 OD<-OD_joined
@@ -269,7 +269,7 @@ OD <- OD %>%
   group_by(CARTAO) %>% 
   mutate(SIU_prox = ifelse(row_number() == n(), first(SIU), lead(SIU)))
 
-#EXPANSÃO ESPACIAL
+#EXPANS?O ESPACIAL
 
 colnames(PED)<-c('SIU','X','Y')
 PED <- SpatialPointsDataFrame(coords = PED[,c("X", "Y")], data = PED,proj4string = proj4string)
@@ -309,15 +309,15 @@ OD$FE1[is.na(OD$FE1)]<-1
 #EXPANSAO MCO
 #TRABALHANDO COM O MCO
 MCO<-filter(MCO,Num.Terminal %in% c(1,2))
-MCO<-filter(MCO,!Código.Externo.Linha %in% c("AC01","AC02","AC03","AC04","AC05","AC06","AC07","AC08","AC09","AC10","AC11","AC13","AC14","AC15","AC16","AC17","AC18","AC19","AC20","AC21","AC22","AC23","AC24","AC25","CM02","CM03","CM04","CM05","CM06","CM07","CM08","CM09","CM10","SD01","SD02","PR01","PR02","1000","1002","2000","2002","3000","3002","4002","4003","4004","6000","7000","5001","5002","5003","5004","5005","5006","5007","5008","5009","5010","5011","5012","5013","5014","5015","5016","5017","5018","5019","1001","2001","3001","4001","6001","7001"))
-MCO$VEIC.H.ABERT<-str_c(MCO$Código.Externo.Linha,MCO$Sub.Linha,MCO$Num.Terminal,str_sub(MCO$Data.Hora.Início.Operação,start = -10,end=-9),"00",sep=":")
+MCO<-filter(MCO,!Codigo.Externo.Linha %in% c("AC01","AC02","AC03","AC04","AC05","AC06","AC07","AC08","AC09","AC10","AC11","AC13","AC14","AC15","AC16","AC17","AC18","AC19","AC20","AC21","AC22","AC23","AC24","AC25","CM02","CM03","CM04","CM05","CM06","CM07","CM08","CM09","CM10","SD01","SD02","PR01","PR02","1000","1002","2000","2002","3000","3002","4002","4003","4004","6000","7000","5001","5002","5003","5004","5005","5006","5007","5008","5009","5010","5011","5012","5013","5014","5015","5016","5017","5018","5019","1001","2001","3001","4001","6001","7001"))
+MCO$VEIC.H.ABERT<-str_c(MCO$Codigo.Externo.Linha,MCO$Sub.Linha,MCO$Num.Terminal,str_sub(MCO$Data.Hora.Inicio.Operacao,start = -10,end=-9),"00",sep=":")
 PASS_TRANSPORTADOS_POR_VIAGEM<-MCO %>% dplyr::select(VEIC.H.ABERT,Passageiros)%>% dplyr::group_by(VEIC.H.ABERT) %>% summarise(PASS_TRA=sum(Passageiros))
 colnames(PASS_TRANSPORTADOS_POR_VIAGEM)<-c("CHAVE","PASS_TRA")
 PASS_TRANSPORTADOS_POR_VIAGEM$CHAVE<-gsub(' ','',PASS_TRANSPORTADOS_POR_VIAGEM$CHAVE)
 PASS_TRANSPORTADOS_POR_VIAGEM$CHAVE<-as.character(PASS_TRANSPORTADOS_POR_VIAGEM$CHAVE)
 PASS_TRANSPORTADOS_POR_VIAGEM$PASS_TRA<-as.numeric(as.character(PASS_TRANSPORTADOS_POR_VIAGEM$PASS_TRA))
 
-#PASSAGEIROS TRANSPORTADOS POR ESTAÇÃO
+#PASSAGEIROS TRANSPORTADOS POR ESTA??O
 ESTACOES_SBE<-SBE_ESTACOES
 ESTACOES_SBE$COUNT<-1
 ESTACOES_SBE$VEIC.H.ABERT<-str_c(ESTACOES_SBE$CODIGO_VEICULO,str_c(str_sub(ESTACOES_SBE$Hora,end=2),":00"),sep=":")
@@ -326,7 +326,7 @@ colnames(MCO_ESTACOES)<-c("CHAVE","PASS_TRA")
 PASS_TRANSPORTADOS_POR_VIAGEM<-rbind(PASS_TRANSPORTADOS_POR_VIAGEM,MCO_ESTACOES)
 rm(MCO_ESTACOES,ESTACOES_SBE)
 
-#COLETANDO VALIDACOES INTERMEDIÁRIAS
+#COLETANDO VALIDACOES INTERMEDI?RIAS
 val_menores_90$Abertura<-str_sub(val_menores_90$Abertura,start=-8)
 val_menores_90$Abertura<-str_sub(val_menores_90$Abertura,end=5)
 val_menores_90$VEIC.H.ABERT<-str_c(val_menores_90$LINHA,val_menores_90$CIT_SUBLINHA,val_menores_90$Sentido,str_sub(val_menores_90$Abertura,end=2),"00",sep=':')
@@ -335,7 +335,7 @@ MCO_int$Count<-1
 MCO_int<-MCO_int %>% dplyr::select(VEIC.H.ABERT,Count) %>% dplyr::group_by(VEIC.H.ABERT) %>% dplyr::summarise(PASS_SEC=sum(Count))
 colnames(MCO_int)<-c("CHAVE","PASS_SEC")
 
-#RETIRANDO VALIDAÇÕES INTERMEDIÁRIAS DA EXPANSÃO
+#RETIRANDO VALIDA??ES INTERMEDI?RIAS DA EXPANS?O
 PASS_TRANSPORTADOS_POR_VIAGEM<-merge(PASS_TRANSPORTADOS_POR_VIAGEM,MCO_int,all.x = T)
 OD$Abertura<-str_sub(OD$Abertura,start=-8)
 OD$VEIC.H.ABERT<-str_c(OD$LINHA,OD$CIT_SUBLINHA,OD$Sentido,str_sub(OD$Abertura,end=2),'00',sep=":")
@@ -347,11 +347,12 @@ EXPANSAO$FE2<-abs((EXPANSAO$PASS_TRA-EXPANSAO$PASS_SEC)/(EXPANSAO$PASS_PESQ))
 EXPANSAO$FE2[EXPANSAO$FE2<1]<-1
 EXPANSAO$FE2[is.na(EXPANSAO$FE2)]<-1
 
-#APLICANDO A EXPANSÃO FINAL
+#APLICANDO A EXPANS?O FINAL
 OD<-merge(OD, EXPANSAO %>% dplyr::select(CHAVE,FE2),by.x="VEIC.H.ABERT",by.y = "CHAVE",all.x=T)
 OD$FE<-OD$FE1*OD$FE2
 sum(OD$FE)
 #SALVANDO ARQUIVO FINAL - OD-SIU
-dia_emb<-gsub("-","",dia_emb)
+dia_emb<-("04102023")
 write.csv2(OD,file=(str_c(dia_emb,"_OD.csv")),row.names=FALSE)
+
 
