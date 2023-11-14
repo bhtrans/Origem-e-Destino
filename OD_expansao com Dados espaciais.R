@@ -6,10 +6,10 @@ library(lubridate)
 library(geosphere)
 library(st)
 library(sf)
+library(sp)
 library(data.table)
 library(aopdata)
 library(terra)
-
 #CARREGANDO ARQUIVOS BRUTOS
 ##CARREGANDO GPS
 current_path = rstudioapi::getActiveDocumentContext()$path 
@@ -24,10 +24,8 @@ myfiles = list.files(path=getwd(),pattern="*.csv",full.names=TRUE)
 SBE = ldply(myfiles, read.csv, sep=";")
 rm(myfiles)
 setwd('..')
-SBE$CARTAO_USUARIO <- paste0("ID", SBE$CARTAO_USUARIO)
-
 ##CARREGANDO DADOS DE DEMANDA DO MCO
-## NECESS?RIO COPIAR ELES DO XLSX PRELIMINARMENTE
+## NECESSÁRIO COPIAR ELES DO XLSX PRELIMINARMENTE
 myfiles = list.files(path=getwd(),pattern="relopemapa*",full.names=TRUE)
 MCO <- read.csv(myfiles,sep=";",encoding = 'latin1')
 ##BD DE VIAGENS REALIZADAS - RESUMO
@@ -38,15 +36,14 @@ setwd('..')
 ##LISTA DE PEDS GEORREFERENCIADOS
 myfiles = list.files(path=getwd(),pattern="SUBLINHAS_vs*",full.names=TRUE)
 SUBLINHA_VS_PED<-read.csv(myfiles,sep=";",encoding = 'latin1')
-dia_emb<-str_sub(MCO$Data.Hora.Inicio.Operacao[1],end=10)
-##LISTA DE ESTA??ES GEORREFERENCIADAS
+dia_emb<-str_sub(MCO$Data.Hora.Início.Operação[1],end=10)
+##LISTA DE ESTAÇÕES GEORREFERENCIADAS
 myfiles = list.files(path=getwd(),pattern="SUBLINHAS_vs*",full.names=TRUE)
 SUBLINHA_VS_PED<-read.csv(myfiles,sep=";",encoding = 'latin1')
 myfiles = list.files(path=getwd(),pattern="X e Y*",full.names=TRUE)
 PED_Est<-read.csv(myfiles,sep=";")
 rm(myfiles)
-
-#CRIANDO CHAVE PARA ASSOCIA??O DE EMBARQUES NO GPS
+#CRIANDO CHAVE PARA ASSOCIAÇÃO DE EMBARQUES NO GPS
 
 GPS$CHAVE<-paste(GPS$vei_nro_veiculo_gestor,GPS$horario_passagem)
 GPS$CHAVE<-gsub(':','',GPS$CHAVE)
@@ -56,11 +53,9 @@ GPS$CHAVE<-as.numeric(GPS$CHAVE)
 #TRANSFORMANDO CARTOES PARA TEXTO
 
 SBE$CARTAO_USUARIO<-as.character(SBE$CARTAO_USUARIO)
-SBE$CARTAO_USUARIO <- paste0("ID", as.character(SBE$CARTAO_USUARIO))
 
 #SEPARANDO DATA E HORA NO SBE
-nrow(SBE)
-nrow(CIT)
+
 CIT<-str_split_fixed(SBE$DATAHORA_UTILIZACAO," ",2)
 colnames(CIT) <-c("Data","Hora")
 SBE<-cbind.data.frame(SBE,CIT)
@@ -68,9 +63,6 @@ rm(CIT)
 SBE$DATAHORA_UTILIZACAO<-NULL
 SBE$Data<-NULL
 SBE$X<-NULL
-
-#CRIANDO SBE_ESTACOES
-
 SBE_ESTACOES<-filter(SBE,CODIGO_LINHA %in% c("AC01","AC02","AC03","AC04","AC05","AC06","AC07","AC08","AC09","AC10","AC11","AC13","AC14","AC15","AC16","AC17","AC18","AC19","AC20","AC21","AC22","AC23","AC24","AC25","CM02","CM03","CM04","CM05","CM06","CM07","CM08","CM09","CM10","SD01","SD02","PR01","PR02","1000","1002","2000","2002","3000","3002","4002","4003","4004","6000","7000","5001","5002","5003","5004","5005","5006","5007","5008","5009","5010","5011","5012","5013","5014","5015","5016","5017","5018","5019"))
 
 #RETIRANDO VALIDACOES EM ESTACOES
@@ -84,6 +76,7 @@ SBE$VEIC_COM_FX<-str_c(SBE$CODIGO_VEICULO,str_sub(SBE$Hora,end=2),sep="-")
 VEIC.GPS<-data.frame(unique(str_c(GPS$vei_nro_veiculo_gestor,str_sub(GPS$horario_passagem,end=2),sep="-")))
 SBE<-merge(SBE,VEIC.GPS,by.x="VEIC_COM_FX",by.y="unique.str_c.GPS.vei_nro_veiculo_gestor..str_sub.GPS.horario_passagem..")
 SBE$VEIC_COM_FX<-NULL
+
 
 #CRIANDO A CHAVE NO SBE
 
@@ -151,7 +144,7 @@ EMBARQUES$Sentido<-gsub('PC','',EMBARQUES$Sentido)
 EMBARQUES$Sentido[is.na(EMBARQUES$Sentido)]<-1
 EMBARQUES<-filter(EMBARQUES,Sentido %in% c('1','2'))
 EMBARQUES$Sentido<-as.numeric(EMBARQUES$Sentido)
-EMBARQUES$Abertura[is.na(EMBARQUES$Abertura)]<-str_c(str_sub(EMBARQUES$HORARIO_VALIDACAO,end=3),'00')
+EMBARQUES$inicio_viagem[is.na(EMBARQUES$inicio_viagem)]<-str_c(str_sub(EMBARQUES$Hora,end=3),'00')
 
 #CRIANDO CHAVE PARA EXPANSAO - PASSAGEIROS COM EMBARQUE CONHECIDO
 EMBARQUES_ESTACOES<-filter(EMBARQUES,LINHA %in% c("AC01","AC02","AC03","AC04","AC05","AC06","AC07","AC08","AC09","AC10","AC11","AC13","AC14","AC15","AC16","AC17","AC18","AC19","AC20","AC21","AC22","AC23","AC24","AC25","CM02","CM03","CM04","CM05","CM06","CM07","CM08","CM09","CM10","SD01","SD02","PR01","PR02","1000","1002","2000","2002","3000","3002","4002","4003","4004","6000","7000","5001","5002","5003","5004","5005","5006","5007","5008","5009","5010","5011","5012","5013","5014","5015","5016","5017","5018","5019","1001","2001","3001","4001","6001","7001"))
@@ -168,6 +161,7 @@ PASS_PESQU_VIAGEM_EMB<-data.frame(cbind(row.names(LIST_PASS_PESQ_POR_VIAGEM_EMB)
 colnames(PASS_PESQU_VIAGEM_EMB)<-c("CHAVE","PASS_PESQU")
 PASS_PESQU_VIAGEM_EMB$PASS_PESQU<-as.numeric(as.character(PASS_PESQU_VIAGEM_EMB$PASS_PESQU))
 rm(LIST_PASS_PESQ_POR_VIAGEM_EMB)
+
 
 #CALCULANDO INTERVALOS ENTRE VALIDA??ES
 OD<-EMBARQUES
@@ -309,8 +303,8 @@ OD$FE1[is.na(OD$FE1)]<-1
 #EXPANSAO MCO
 #TRABALHANDO COM O MCO
 MCO<-filter(MCO,Num.Terminal %in% c(1,2))
-MCO<-filter(MCO,!Codigo.Externo.Linha %in% c("AC01","AC02","AC03","AC04","AC05","AC06","AC07","AC08","AC09","AC10","AC11","AC13","AC14","AC15","AC16","AC17","AC18","AC19","AC20","AC21","AC22","AC23","AC24","AC25","CM02","CM03","CM04","CM05","CM06","CM07","CM08","CM09","CM10","SD01","SD02","PR01","PR02","1000","1002","2000","2002","3000","3002","4002","4003","4004","6000","7000","5001","5002","5003","5004","5005","5006","5007","5008","5009","5010","5011","5012","5013","5014","5015","5016","5017","5018","5019","1001","2001","3001","4001","6001","7001"))
-MCO$VEIC.H.ABERT<-str_c(MCO$Codigo.Externo.Linha,MCO$Sub.Linha,MCO$Num.Terminal,str_sub(MCO$Data.Hora.Inicio.Operacao,start = -10,end=-9),"00",sep=":")
+MCO<-filter(MCO,!C.digo.Externo.Linha %in% c("AC01","AC02","AC03","AC04","AC05","AC06","AC07","AC08","AC09","AC10","AC11","AC13","AC14","AC15","AC16","AC17","AC18","AC19","AC20","AC21","AC22","AC23","AC24","AC25","CM02","CM03","CM04","CM05","CM06","CM07","CM08","CM09","CM10","SD01","SD02","PR01","PR02","1000","1002","2000","2002","3000","3002","4002","4003","4004","6000","7000","5001","5002","5003","5004","5005","5006","5007","5008","5009","5010","5011","5012","5013","5014","5015","5016","5017","5018","5019","1001","2001","3001","4001","6001","7001"))
+MCO$VEIC.H.ABERT<-str_c(MCO$C.digo.Externo.Linha,MCO$Sub.Linha,MCO$Num.Terminal,str_sub(MCO$Data.Hora.In.cio.Opera..o,start = -10,end=-9),"00",sep=":")
 PASS_TRANSPORTADOS_POR_VIAGEM<-MCO %>% dplyr::select(VEIC.H.ABERT,Passageiros)%>% dplyr::group_by(VEIC.H.ABERT) %>% summarise(PASS_TRA=sum(Passageiros))
 colnames(PASS_TRANSPORTADOS_POR_VIAGEM)<-c("CHAVE","PASS_TRA")
 PASS_TRANSPORTADOS_POR_VIAGEM$CHAVE<-gsub(' ','',PASS_TRANSPORTADOS_POR_VIAGEM$CHAVE)
@@ -352,7 +346,6 @@ OD<-merge(OD, EXPANSAO %>% dplyr::select(CHAVE,FE2),by.x="VEIC.H.ABERT",by.y = "
 OD$FE<-OD$FE1*OD$FE2
 sum(OD$FE)
 #SALVANDO ARQUIVO FINAL - OD-SIU
-dia_emb<-("04102023")
+dia_emb<-("DUNOV_2023")
 write.csv2(OD,file=(str_c(dia_emb,"_OD.csv")),row.names=FALSE)
-
 
